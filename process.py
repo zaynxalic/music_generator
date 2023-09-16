@@ -1,13 +1,11 @@
-import numpy as np
-import os
 from moviepy.editor import *
-import re
 from moviepy.config import change_settings
 # Load the video clip
 import whisper
-import ffmpeg
+from os.path import join
 from transformers import AutoModelWithLMHead,AutoTokenizer,pipeline
 from pathlib import Path
+from pydub import AudioSegment
 
 def ts(model_name):
     model = AutoModelWithLMHead.from_pretrained(model_name)
@@ -45,10 +43,17 @@ def generate_caption(clip, txt, start, end):
     return txt_clip
 
 if __name__ == "__main__":
-    AUDIO_FILE = r"wav_audios/vampire.wav" #ENDS WITH WAV
+    AUDIO_FILE = r"origin_audios/y2mate.is - Zedd Elley Duhé Happy Now Official Music Video -KfXvjxbRhZk-192k-1694861062.mp3" #ENDS WITH WAV or MP3 but MP3 needs to be converted to WAV
     VIDEO_FILE = r"origin_videos/y2mate.is - Olivia Rodrigo vampire Official Video -RlPNh_PBZb4-1080pp-1693650167.mp4" #ENDS WITH MP4
     MODEL_NAME = 'liam168/trans-opus-mt-en-zh'
-    assert AUDIO_FILE.endswith("wav")
+    OUTPUT_MUSIC_PATH = "wav_audios/"
+    assert AUDIO_FILE.endswith("wav") or AUDIO_FILE.endswith("mp3")
+    if AUDIO_FILE.endswith("mp3"):
+        sound = AudioSegment.from_file(AUDIO_FILE)
+        print(f"exporting {AUDIO_FILE} to wav...")
+        mp3_name = Path(AUDIO_FILE).stem
+        sound.export(join(OUTPUT_MUSIC_PATH,f"{mp3_name}.wav"), format="wav")
+        AUDIO_FILE = join(OUTPUT_MUSIC_PATH,f"{mp3_name}.wav")
     assert VIDEO_FILE.endswith("mp4")
     SAVE_N_CHECK = False
     print("Get the video captions...")
