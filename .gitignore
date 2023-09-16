@@ -1,0 +1,8 @@
+lyrics/
+nuwave2/
+origin_audios/
+origin_videos/
+upscaled_audios/
+.DS_Store
+__pycache__/
+Whisper_auto2lrc/
