@@ -6,6 +6,8 @@ from os.path import join
 from transformers import AutoModelWithLMHead,AutoTokenizer,pipeline
 from pathlib import Path
 from pydub import AudioSegment
+import chinese_converter
+from youtube_transcript_api import YouTubeTranscriptApi # two ways to retrieve the transcript
 
 def ts(model_name):
     model = AutoModelWithLMHead.from_pretrained(model_name)
@@ -13,7 +15,15 @@ def ts(model_name):
     translation = pipeline("translation_en_to_zh", model=model, tokenizer=tokenizer)
     return translation
 
-def get_caption(model_name, music_file, chinese=False):
+def get_caption_from_audioSegment(model_name, music_file):
+    """
+    Unsupported Chinese Language for now.
+    Args:
+        model_name (_type_): use pretrained model to translate the text
+        music_file (_type_): _description_
+    Returns:
+        _type_: _description_
+    """
     captions = []
     model = whisper.load_model("small")
     result = model.transcribe(music_file,no_speech_threshold=0.4)
@@ -22,14 +32,46 @@ def get_caption(model_name, music_file, chinese=False):
         caption = {}
         start_ = float(result['segments'][idx]['start'])
         end_ = float(result['segments'][idx]['end'])
-        caption["start"] = start_ if idx != 0 else max(end_ - 3.0, 0)
+        caption["start"] = start_
         caption["end"] = end_
         txt = result['segments'][idx]['text']
-        if chinese:
-            caption["txt"] = txt
+        translated = translation(txt)
+        caption["txt"] = txt + "\n" + translated[0]['translation_text']
+        captions.append(caption)
+    return captions
+
+def get_caption_from_youtube_script(model_name, video_id):
+    """
+    Args:
+        model_name (_type_): _description_
+        video_id (_type_): _description_
+    Returns:
+        _type_: _description_
+    """
+    captions = []
+    # get English transcript for a video.
+    english = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+    # get Chinese transcript for a video from youtube transcript
+    # if there is no chinese transcript, 
+    # we use the translation to generate the chinese transcript
+    error = False
+    try:
+        chinese = YouTubeTranscriptApi.get_transcript(video_id, languages=['zh-Hans','zh-Hant'])
+    except:
+        translation = ts(model_name)
+        error = True
+    for idx, seg in enumerate(english):
+        caption = {}
+        start_ = float(english[idx]['start'])
+        end_ = start_ + float(english[idx]['duration'])
+        caption["start"] = start_
+        caption["end"] = end_
+        txt = english[idx]['text'].replace("\n", " ").replace("♪", "")
+        if error:
+            translated = translation(txt)[0]['translation_text']
         else:
-            translated = translation(txt)
-            caption["txt"] = txt + "\n" + translated[0]['translation_text']
+            translated = chinese[idx]['text'].replace("\n", " ").replace("♪", "")
+        caption["txt"] = txt + "\n" + translated
         print(caption)
         captions.append(caption)
     return captions
@@ -43,34 +85,45 @@ def generate_caption(clip, txt, start, end):
     return txt_clip
 
 if __name__ == "__main__":
-    AUDIO_FILE = r"origin_audios/y2mate.is - Zedd Elley Duhé Happy Now Official Music Video -KfXvjxbRhZk-192k-1694861062.mp3" #ENDS WITH WAV or MP3 but MP3 needs to be converted to WAV
-    VIDEO_FILE = r"origin_videos/y2mate.is - Olivia Rodrigo vampire Official Video -RlPNh_PBZb4-1080pp-1693650167.mp4" #ENDS WITH MP4
+    AUDIO_FILE = r"origin_audios/y2mate.is - 胡夏 Xia Hu Those Bygone Years 那些年-KqjgLbKZ1h0-192k-1694863939.mp3" #ENDS WITH WAV or MP3 but MP3 needs to be converted to WAV
+    VIDEO_FILE = r"origin_videos/yt5s.io-Olivia Rodrigo - get him back! (Official Video)-(1080p).mp4" #ENDS WITH MP4
+    VIDEO_ID = "ZsJ-BHohXRI"
     MODEL_NAME = 'liam168/trans-opus-mt-en-zh'
     OUTPUT_MUSIC_PATH = "wav_audios/"
-    assert AUDIO_FILE.endswith("wav") or AUDIO_FILE.endswith("mp3")
-    if AUDIO_FILE.endswith("mp3"):
-        sound = AudioSegment.from_file(AUDIO_FILE)
-        print(f"exporting {AUDIO_FILE} to wav...")
-        mp3_name = Path(AUDIO_FILE).stem
-        sound.export(join(OUTPUT_MUSIC_PATH,f"{mp3_name}.wav"), format="wav")
-        AUDIO_FILE = join(OUTPUT_MUSIC_PATH,f"{mp3_name}.wav")
+    MODE = 2
+    assert (MODE != 2) or (VIDEO_ID != "") # if given Mode = 2, you should give the VIDEO_ID
+    assert (MODE != 1) or AUDIO_FILE.endswith("wav") or AUDIO_FILE.endswith("mp3")
     assert VIDEO_FILE.endswith("mp4")
-    SAVE_N_CHECK = False
     print("Get the video captions...")
-    captions = get_caption(MODEL_NAME,AUDIO_FILE)
-    if not SAVE_N_CHECK:  
-        video = VideoFileClip(VIDEO_FILE)
-        # Create the caption clips
-        caption_clips = [generate_caption(video, **caption) for caption in captions]
+    assert MODE in [1,2,3] 
+    # When mode == 1, then we use the audio file to generate the captions.
+    # When mode == 2, then we use the youtube transcript to generate the captions
+    # When mode == 3, then we use the lyric search to generate the captions 
+    if MODE == 1:
+        captions = get_caption_from_audioSegment(MODEL_NAME,AUDIO_FILE)
+        if AUDIO_FILE.endswith("mp3"):
+            sound = AudioSegment.from_file(AUDIO_FILE)
+            print(f"exporting {AUDIO_FILE} to wav...")
+            mp3_name = Path(AUDIO_FILE).stem
+            sound.export(join(OUTPUT_MUSIC_PATH,f"{mp3_name}.wav"), format="wav")
+            AUDIO_FILE = join(OUTPUT_MUSIC_PATH,f"{mp3_name}.wav")
+    elif MODE == 2:
+        captions = get_caption_from_youtube_script(MODEL_NAME,VIDEO_ID)
+    elif MODE == 3:
+        raise NotImplementedError
+    # if not SAVE_N_CHECK:  
+    video = VideoFileClip(VIDEO_FILE)
+    # Create the caption clips
+    caption_clips = [generate_caption(video, **caption) for caption in captions]
 
-        # Overlay the captions on the video
-        final = CompositeVideoClip([video] + caption_clips)
-        print("Write the video to file...")
-        # Export the video with captions
-        final.write_videofile(
-            VIDEO_FILE + "_caption.mp4",
-            audio_codec='aac', 
-            temp_audiofile='temp-audio.m4a', 
-            remove_temp=True)
+    # Overlay the captions on the video
+    final = CompositeVideoClip([video] + caption_clips)
+    print("Write the video to file...")
+    # Export the video with captions
+    final.write_videofile(
+        VIDEO_FILE + "_caption.mp4",
+        audio_codec='aac', 
+        temp_audiofile='temp-audio.m4a', 
+        remove_temp=True)
 
    
